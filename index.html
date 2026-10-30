@@ -71,6 +71,9 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
     <div><label>項目</label><select id="cat"></select></div>
     <div><label>金額（円）</label><input type="number" id="amount" inputmode="numeric" min="0" placeholder="0"></div>
   </div>
+  <div class="row" style="margin-top:8px">
+    <div><label>現金・口座</label><select id="acct"></select></div>
+  </div>
   <div style="margin-top:8px"><label>メモ</label><input id="memo" placeholder="例：スーパー、○○病院、など"></div>
   <div class="photo">
     <label class="btn">📷 レシートを撮る・選ぶ<input type="file" id="photo" accept="image/*" hidden></label>
@@ -104,6 +107,12 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
 </div>
 
 <div class="card">
+  <h2>現金・口座別</h2>
+  <table id="acctTable"></table>
+  <div class="meta" style="margin-top:6px">「累計」は、記録をつけ始めてからの収入−支出です。最初に持っていた金額は含みません。</div>
+</div>
+
+<div class="card">
   <h2>人別（この月）</h2>
   <table id="personTable"></table>
 </div>
@@ -134,6 +143,8 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
 <div id="viewer"><img alt="レシート"></div>
 <script>
 const PEOPLE=["お父さん","貴子","共通"];
+const ACCTS=["現金","口座"];
+const acctOf=r=>r.acct||"現金";
 const CATS={
   "支出":["必要経費","食費","生活費","医療費","その他"],
   "収入":["給与・報酬","年金","事業収入","その他"]
@@ -186,6 +197,7 @@ function init(){
   $("month").value=today().slice(0,7);
   fillSelect($("person"),PEOPLE);
   fillSelect($("fperson"),PEOPLE,true);
+  fillSelect($("acct"),ACCTS);
   setType("支出");
   render();
 }
@@ -199,7 +211,7 @@ document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.
 $("add").onclick=async()=>{
   const amount=parseInt($("amount").value,10);
   if(!amount||amount<=0){alert("金額を入れてください");return}
-  const rec={id:Date.now()+Math.random().toString(36).slice(2,6),date:$("date").value||today(),type,person:$("person").value,cat:$("cat").value,amount,memo:$("memo").value.trim()};
+  const rec={id:Date.now()+Math.random().toString(36).slice(2,6),date:$("date").value||today(),type,person:$("person").value,cat:$("cat").value,acct:$("acct").value,amount,memo:$("memo").value.trim()};
   if(pending){
     try{await imgPut(rec.id,pending);rec.receipt=true}
     catch(err){if(!confirm("写真を保存できませんでした。写真なしで記録しますか？"))return}
@@ -268,6 +280,17 @@ function render(){
       return `<tr><td>${c}</td>${vals.map(v=>`<td class="r">${v?yen(v):"-"}</td>`).join("")}<td class="r"><b>${yen(vals.reduce((a,b)=>a+b,0))}</b></td></tr>`;
     }).join("");
 
+  // 現金・口座別
+  const allP=data.filter(r=>!fp||r.person===fp);
+  $("acctTable").innerHTML='<tr><th></th><th class="r">収入</th><th class="r">支出</th><th class="r">この月の差引</th><th class="r">累計</th></tr>'+
+    ACCTS.map(a=>{
+      const i=rows.filter(r=>r.type==="収入"&&acctOf(r)===a).reduce((s,r)=>s+r.amount,0);
+      const e=rows.filter(r=>r.type==="支出"&&acctOf(r)===a).reduce((s,r)=>s+r.amount,0);
+      const t=allP.filter(r=>acctOf(r)===a).reduce((s,r)=>s+(r.type==="収入"?r.amount:-r.amount),0);
+      const f=n=>(n<0?"-":"")+yen(Math.abs(n));
+      return `<tr><td>${a}</td><td class="r inc">${yen(i)}</td><td class="r exp">${yen(e)}</td><td class="r">${f(i-e)}</td><td class="r"><b>${f(t)}</b></td></tr>`;
+    }).join("");
+
   // 人別
   $("personTable").innerHTML='<tr><th></th><th class="r">収入</th><th class="r">支出</th><th class="r">差引</th></tr>'+
     PEOPLE.map(p=>{
@@ -288,7 +311,7 @@ function render(){
   $("list").innerHTML=rows.length?rows.map(r=>`
     <div class="item">
       <div>
-        <div><span class="tag">${esc(r.person)}</span><span class="tag">${esc(r.cat)}</span>${esc(r.memo)}</div>
+        <div><span class="tag">${esc(r.person)}</span><span class="tag">${esc(r.cat)}</span><span class="tag">${esc(acctOf(r))}</span>${esc(r.memo)}</div>
         <div class="meta">${r.date}${r.receipt?` <button class="small" onclick="showReceipt('${r.id}')">📷 レシート</button>`:""}</div>
       </div>
       <div style="text-align:right">
@@ -319,7 +342,7 @@ $("exJsonP").onclick=async()=>{
 };
 $("exCsv").onclick=()=>{
   const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
-  const csv="日付,収支,誰の,項目,金額,メモ\n"+[...data].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>[r.date,r.type,r.person,r.cat,r.amount,q(r.memo)].join(",")).join("\n");
+  const csv="日付,収支,誰の,項目,現金・口座,金額,メモ\n"+[...data].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>[r.date,r.type,r.person,r.cat,acctOf(r),r.amount,q(r.memo)].join(",")).join("\n");
   download("kakeibo-"+today()+".csv","\ufeff"+csv,"text/csv");
 };
 $("imJson").onchange=e=>{
