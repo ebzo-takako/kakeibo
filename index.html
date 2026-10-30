@@ -125,7 +125,7 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
     <button id="exJson">JSON書き出し</button>
     <button id="exCsv">CSV書き出し</button>
     <button id="exJsonP">写真つきJSON書き出し</button>
-    <label class="btn">JSON読み込み<input type="file" id="imJson" accept=".json" hidden></label>
+    <label class="btn">JSON読み込み<input type="file" id="imJson" accept=".json,application/json,text/plain" hidden></label>
   </div>
   <div class="meta" style="margin-top:6px">データはこの端末のブラウザ内に保存されます。レシート写真も同じ端末内に保存されます（JSON書き出しには入りません。写真も移すときは「写真つき」を使ってください）。端末を替えるときは書き出して読み込んでください。</div>
 </div>
@@ -300,10 +300,14 @@ function render(){
 function del(id){if(confirm("削除しますか？")){data=data.filter(r=>r.id!==id);save();imgDel(id).catch(()=>{});render()}}
 $("month").onchange=render;$("fperson").onchange=render;
 
-function download(name,text,mime){
+async function download(name,text,mime){
+  try{
+    const f=new File([text],name,{type:mime});
+    if(/iPhone|iPad/.test(navigator.userAgent)&&navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}
+  }catch(e){if(e&&e.name==="AbortError")return}
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([text],{type:mime}));
-  a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 $("exJson").onclick=()=>download("kakeibo-"+today()+".json",JSON.stringify(data,null,2),"application/json");
 $("exJsonP").onclick=async()=>{
