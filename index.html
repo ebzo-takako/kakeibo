@@ -79,7 +79,7 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
   </div>
   <details class="ocr">
     <summary>🧾 レシートの文字から自動入力</summary>
-    <div class="meta">下の欄をタップ →「テキストをスキャン」でレシートを写すと文字が入ります（iPhone標準機能）。その後「自動入力」を押すと、金額・日付・項目・メモを上の欄に入れます。必ず内容を確認してから記録してください。</div>
+    <div class="meta">下の欄をタップ →「テキストをスキャン」でレシートを写すと文字が入ります（iPhone標準機能）。うまく写らないときは、何回かに分けて写すと、文字が続けて入ります。その後「自動入力」を押すと、金額・日付・項目・メモを上の欄に入れます。必ず内容を確認してから記録してください。</div>
     <textarea id="ocrText" rows="4" placeholder="ここにレシートの文字"></textarea>
     <button id="ocrGo" style="margin-top:6px">自動入力</button>
   </details>
@@ -223,8 +223,9 @@ function parseReceipt(raw){
   const t=raw.normalize("NFKC"),lines=t.split(/\n/).map(l=>l.trim()).filter(Boolean);
   const out={};
   const num=l=>[...l.matchAll(/(?<![\d\-])[¥\\]?\s?(\d{1,3}(?:,\d{3})+|\d{2,7})\s?円?(?![\d\-])/g)].map(m=>parseInt(m[1].replace(/,/g,""),10));
-  const keyLines=lines.filter(l=>/合計|お買上|お会計|ご請求|請求額|税込|total/i.test(l)&&!/小計|消費税|内税|外税|対象|お預|釣|お釣/.test(l));
-  let cand=keyLines.flatMap(num);
+  const isKey=l=>/合計|お買上|お会計|ご請求|請求額|税込|total/i.test(l.replace(/\s/g,""))&&!/小計|消費税|内税|外税|対象|お預|釣/.test(l.replace(/\s/g,""));
+  let cand=[];
+  lines.forEach((l,i)=>{if(isKey(l)){let n=num(l);if(!n.length&&i+1<lines.length)n=num(lines[i+1]);if(!n.length&&i+2<lines.length)n=num(lines[i+2]);cand.push(...n)}});
   if(!cand.length){cand=lines.filter(l=>!/TEL|電話|\d{2,4}-\d{2,4}-\d{3,4}|\d{4}[\/年.]\d/.test(l)).flatMap(num)}
   if(cand.length)out.amount=Math.max(...cand);
   let m=t.match(/(20\d{2})\s?[\/\-.年]\s?(\d{1,2})\s?[\/\-.月]\s?(\d{1,2})/);
@@ -232,7 +233,7 @@ function parseReceipt(raw){
   if(m){[y,mo,d]=[+m[1],+m[2],+m[3]]}
   else if(m=t.match(/令和\s?(\d{1,2})\s?年\s?(\d{1,2})\s?月\s?(\d{1,2})/)){[y,mo,d]=[2018+ +m[1],+m[2],+m[3]]}
   if(y&&mo>=1&&mo<=12&&d>=1&&d<=31)out.date=y+"-"+String(mo).padStart(2,"0")+"-"+String(d).padStart(2,"0");
-  const store=lines.find(l=>/[ぁ-ヶ一-龠A-Za-z]{2,}/.test(l)&&!/^(領収|レシート|毎度|まいど|ありがとう|ご利用|いらっしゃい|TEL|電話|〒)/.test(l)&&!/\d{2,4}-\d{2,4}-\d{3,4}/.test(l));
+  const store=lines.find(l=>/[ぁ-ヶー一-龠A-Za-z]{2,}/.test(l)&&!/\d\s?円?$/.test(l)&&!/合計|お預|お釣|小計|税/.test(l)&&!/^(領収|レシート|毎度|まいど|ありがとう|ご利用|いらっしゃい|TEL|電話|〒)/.test(l)&&!/\d{2,4}-\d{2,4}-\d{3,4}/.test(l));
   if(store)out.memo=store.slice(0,30);
   for(const c in CAT_WORDS){if(CAT_WORDS[c].some(w=>t.includes(w))){out.cat=c;break}}
   return out;
@@ -246,6 +247,7 @@ $("ocrGo").onclick=()=>{
   if(r.date)$("date").value=r.date;
   if(r.memo)$("memo").value=r.memo;
   if(r.cat)$("cat").value=r.cat;
+  if(!r.amount)alert("金額が読み取れませんでした。合計の部分も写っているか確認して、金額は手で入れてください。");
   const got=[r.amount&&"金額",r.date&&"日付",r.memo&&"メモ",r.cat&&"項目"].filter(Boolean);
   alert(got.length?got.join("・")+"を入れました。内容を確認してください。"+(r.cat?"":"\n項目は判定できなかったので選んでください。"):"読み取れませんでした。手で入力してください。");
 };
