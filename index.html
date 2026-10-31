@@ -77,6 +77,8 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
     <div><label id="acctLabel">現金・口座</label><select id="acct"></select></div>
     <div id="toBox" hidden><label>移動先</label><select id="toAcct"></select></div>
   </div>
+  <div id="loanBox" style="margin-top:8px" hidden><label>貸し借り</label>
+    <select id="loan"><option value="1">貸し借りとして数える（貸した・借りた・返した）</option><option value="0">数えない（あげた・生活費など）</option></select></div>
   <div style="margin-top:8px"><label>メモ</label><input id="memo" placeholder="例：スーパー、○○病院、など"></div>
   <div class="photo">
     <label class="btn">📷 レシートを撮る・選ぶ<input type="file" id="photo" accept="image/*" hidden></label>
@@ -116,6 +118,12 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
 </div>
 
 <div class="card">
+  <h2>貴子とお父さんの貸し借り</h2>
+  <div id="loanSum" style="font-size:16px"></div>
+  <div class="meta" style="margin-top:6px">貴子さんの口座・現金とお父さんの口座・現金のあいだの「移動」を、貸し借りとして数えます。借りたとき・返したときも、「移動」で記録してください。</div>
+</div>
+
+<div class="card">
   <h2>人別（この月）</h2>
   <table id="personTable"></table>
 </div>
@@ -146,8 +154,22 @@ textarea{font:inherit;width:100%;padding:9px;border:1px solid var(--line);border
 <div id="viewer"><img alt="レシート"></div>
 <script>
 const PEOPLE=["お父さん","貴子","共通"];
-const ACCTS=["現金","貴子・PayPay銀行","貴子・三井住友銀行","貴子・PayPay","貴子・Suica","お父さん・あいち銀行","お父さん・郵貯"];
-const acctOf=r=>r.acct||"現金";
+const ACCTS=["貴子・現金","お父さん・現金","貴子・PayPay銀行","貴子・三井住友銀行","貴子・PayPay","貴子・Suica","お父さん・あいち銀行","お父さん・郵貯"];
+const acctOf=r=>{
+  if(r.acct&&r.acct!=="現金")return r.acct;
+  return r.person==="貴子"?"貴子・現金":r.person==="お父さん"?"お父さん・現金":"現金";
+};
+const ownerOf=a=>a.startsWith("貴子")?"貴子":a.startsWith("お父さん")?"お父さん":"";
+function loanInfo(){
+  const rs=data.filter(r=>r.type==="移動"&&r.loan).sort((a,b)=>a.date.localeCompare(b.date)||String(a.id).localeCompare(String(b.id)));
+  let L=0;const label={};
+  rs.forEach(r=>{
+    const d=ownerOf(acctOf(r))==="貴子"?r.amount:-r.amount;
+    label[r.id]=(L!==0&&Math.sign(d)!==Math.sign(L))?"返済":"貸し借り";
+    L+=d;
+  });
+  return {L,label};
+}
 const delta=(r,a,onlyMove)=>{
   if(r.type==="移動")return (r.to===a?r.amount:0)-(acctOf(r)===a?r.amount:0);
   if(onlyMove||acctOf(r)!==a)return 0;
@@ -218,7 +240,14 @@ function setType(t){
   $("catBox").hidden=mv;$("toBox").hidden=!mv;
   $("acctLabel").textContent=mv?"移動元":"現金・口座";
   if(!mv)fillSelect($("cat"),CATS[t]);
+  updLoan();
 }
+function updLoan(){
+  const a=ownerOf($("acct").value),b=ownerOf($("toAcct").value);
+  $("loanBox").hidden=!(type==="移動"&&a&&b&&a!==b);
+}
+$("acct").onchange=updLoan;$("toAcct").onchange=updLoan;
+$("person").onchange=()=>{const c=$("person").value+"・現金";if(ACCTS.includes(c)&&/・現金$/.test($("acct").value)){$("acct").value=c;updLoan()}};
 document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>setType(b.dataset.t));
 
 $("add").onclick=async()=>{
@@ -228,6 +257,7 @@ $("add").onclick=async()=>{
   if(type==="移動"){
     if($("acct").value===$("toAcct").value){alert("移動元と移動先が同じです");return}
     rec.to=$("toAcct").value;
+    if(!$("loanBox").hidden&&$("loan").value==="1")rec.loan=true;
   }
   if(pending){
     try{await imgPut(rec.id,pending);rec.receipt=true}
@@ -300,7 +330,7 @@ function render(){
   // 現金・口座別
   const allP=data.filter(r=>!fp||r.person===fp);
   $("acctTable").innerHTML='<tr><th></th><th class="r">収入</th><th class="r">支出</th><th class="r">移動</th><th class="r">累計</th></tr>'+
-    [...ACCTS,...(data.some(r=>r.acct==="口座")?["口座"]:[])].map(a=>{
+    [...ACCTS,...["現金","口座"].filter(x=>data.some(r=>acctOf(r)===x||r.to===x))].map(a=>{
       const i=rows.filter(r=>r.type==="収入"&&acctOf(r)===a).reduce((s,r)=>s+r.amount,0);
       const e=rows.filter(r=>r.type==="支出"&&acctOf(r)===a).reduce((s,r)=>s+r.amount,0);
       const mv=rows.reduce((s,r)=>s+delta(r,a,true),0);
@@ -309,6 +339,8 @@ function render(){
       return `<tr><td>${a}</td><td class="r inc">${yen(i)}</td><td class="r exp">${yen(e)}</td><td class="r">${mv?f(mv):"-"}</td><td class="r"><b>${f(t)}</b></td></tr>`;
     }).join("");
 
+  const li=loanInfo();
+  $("loanSum").innerHTML=li.L>0?`お父さんは貴子に <b class="exp">${yen(li.L)}</b> 借りています`:li.L<0?`貴子はお父さんに <b class="exp">${yen(-li.L)}</b> 借りています`:"貸し借りはありません";
   // 人別
   $("personTable").innerHTML='<tr><th></th><th class="r">収入</th><th class="r">支出</th><th class="r">差引</th></tr>'+
     PEOPLE.map(p=>{
@@ -329,7 +361,7 @@ function render(){
   $("list").innerHTML=rows.length?rows.map(r=>`
     <div class="item">
       <div>
-        <div><span class="tag">${esc(r.person)}</span>${r.type==="移動"?`<span class="tag">移動</span><span class="tag">${esc(acctOf(r))} → ${esc(r.to||"")}</span>`:`<span class="tag">${esc(r.cat)}</span><span class="tag">${esc(acctOf(r))}</span>`}${esc(r.memo)}</div>
+        <div><span class="tag">${esc(r.person)}</span>${r.type==="移動"?`<span class="tag">移動</span><span class="tag">${esc(acctOf(r))} → ${esc(r.to||"")}</span>${r.loan?`<span class="tag">${li.label[r.id]||"貸し借り"}</span>`:""}`:`<span class="tag">${esc(r.cat)}</span><span class="tag">${esc(acctOf(r))}</span>`}${esc(r.memo)}</div>
         <div class="meta">${r.date}${r.receipt?` <button class="small" onclick="showReceipt('${r.id}')">📷 レシート</button>`:""}</div>
       </div>
       <div style="text-align:right">
